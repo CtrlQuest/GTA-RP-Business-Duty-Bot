@@ -55,8 +55,8 @@ Key features:
 - Live on-duty list
 - Exact clock-on and clock-off timestamps in the server timezone
 - Minute-based pay-period reports
-- Manager time corrections with audit logs
-- Summary and detailed shift CSV exports with a confirmed reset
+- Manager time corrections with a searchable member picker and audit logs
+- Simple one-line-per-person text export with a confirmed reset
 - Separate configuration and records for each server
 - Eastern, Central, Mountain, Pacific, UTC, and UK timezone choices
 

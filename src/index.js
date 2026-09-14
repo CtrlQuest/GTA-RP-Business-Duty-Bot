@@ -10,6 +10,7 @@ const {
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
   REST,
@@ -17,6 +18,7 @@ const {
   SlashCommandBuilder,
   TextInputBuilder,
   TextInputStyle,
+  UserSelectMenuBuilder,
 } = require('discord.js');
 const { DateTime } = require('luxon');
 const { loadConfig } = require('./config');
@@ -28,7 +30,7 @@ const {
   discordTimestamp,
 } = require('./time');
 const { buildWeeklyReport, buildOnDutyEmbed } = require('./report');
-const { buildShiftCsv, buildSummaryCsv } = require('./export');
+const { buildSummaryText } = require('./export');
 const { isGuildOwner } = require('./permissions');
 
 const config = loadConfig();
@@ -42,6 +44,7 @@ const buttonIds = {
   onDuty: 'duty_on_duty',
   report: 'duty_weekly_report',
   adjustTime: 'duty_adjust_time',
+  adjustMember: 'duty_adjust_member',
   adjustTimeModal: 'duty_adjust_time_modal',
   exportReset: 'duty_export_reset',
   confirmReset: 'duty_confirm_export_reset',
@@ -172,7 +175,7 @@ function presentationConfig(settings) {
 async function replyNotConfigured(interaction) {
   const response = {
     content: 'This server has not been configured yet. The server owner or an administrator must run `/setup` first.',
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   };
   if (interaction.replied || interaction.deferred) await interaction.followUp(response);
   else await interaction.reply(response);
@@ -233,20 +236,20 @@ async function ensureDutyPanel(guildId) {
 
 async function configureServer(interaction) {
   if (!canRunSetup(interaction)) {
-    await interaction.reply({ content: 'Only the server owner or a Discord administrator can run `/setup`.', ephemeral: true });
+    await interaction.reply({ content: 'Only the server owner or a Discord administrator can run `/setup`.', flags: MessageFlags.Ephemeral });
     return;
   }
   const panelChannel = interaction.options.getChannel('clock-channel', true);
   const logChannel = interaction.options.getChannel('log-channel', true);
   const managerRole = interaction.options.getRole('manager-role', true);
   if (panelChannel.id === logChannel.id) {
-    await interaction.reply({ content: 'Choose separate clock and log channels.', ephemeral: true });
+    await interaction.reply({ content: 'Choose separate clock and log channels.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (managerRole.id === interaction.guildId || managerRole.managed) {
     await interaction.reply({
       content: 'Choose a normal manager role that can be assigned to staff, not @everyone or an integration role.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -259,11 +262,11 @@ async function configureServer(interaction) {
   if (!panelPermissions?.has(panelRequired) || !logPermissions?.has(logRequired)) {
     await interaction.reply({
       content: 'The bot needs View Channel and Send Messages in both channels, plus Embed Links and Read Message History in the clock channel.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const existing = store.guildConfig(interaction.guildId);
   const settings = store.configureGuild(interaction.guildId, {
     panelChannelId: panelChannel.id,
@@ -291,7 +294,7 @@ async function showSetupStatus(interaction) {
   const settings = guildSettings(interaction);
   if (!settings) return await replyNotConfigured(interaction);
   if (!isApproved(interaction)) {
-    await interaction.reply({ content: 'You do not have permission to view the setup.', ephemeral: true });
+    await interaction.reply({ content: 'You do not have permission to view the setup.', flags: MessageFlags.Ephemeral });
     return;
   }
   const managers = settings.managers?.length ? settings.managers.map((id) => `<@${id}>`).join(', ') : 'None';
@@ -299,7 +302,7 @@ async function showSetupStatus(interaction) {
     content: [`**${settings.businessName} setup**`, `Clock channel: <#${settings.panelChannelId}>`,
       `Log channel: <#${settings.logChannelId}>`, `Manager role: <@&${settings.managerRoleId}>`,
       `Individually approved: ${managers}`, `Timezone: ${settings.timezone}`].join('\n'),
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -309,13 +312,13 @@ async function changeManager(interaction, remove = false) {
   if (!canAssignManagers(interaction)) {
     await interaction.reply({
       content: 'Only the Discord server owner can add or remove approved managers.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
   const member = interaction.options.getUser('member', true);
   if (member.bot) {
-    await interaction.reply({ content: 'A bot cannot be added as a duty manager.', ephemeral: true });
+    await interaction.reply({ content: 'A bot cannot be added as a duty manager.', flags: MessageFlags.Ephemeral });
     return;
   }
   const changed = remove ? store.removeManager(interaction.guildId, member.id)
@@ -324,7 +327,7 @@ async function changeManager(interaction, remove = false) {
   await interaction.reply({
     content: changed ? `✅ <@${member.id}> was ${action} the individually approved duty managers.`
       : `<@${member.id}> ${remove ? 'was not individually approved' : 'is already an approved duty manager'}.`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
   if (changed) {
     await sendLog(interaction.guildId,
@@ -337,14 +340,14 @@ async function listManagers(interaction) {
   const settings = guildSettings(interaction);
   if (!settings) return await replyNotConfigured(interaction);
   if (!isApproved(interaction)) {
-    await interaction.reply({ content: 'You do not have permission to view duty managers.', ephemeral: true });
+    await interaction.reply({ content: 'You do not have permission to view duty managers.', flags: MessageFlags.Ephemeral });
     return;
   }
   const individual = settings.managers?.length ? settings.managers.map((id) => `• <@${id}>`).join('\n')
     : 'No individually approved managers.';
   await interaction.reply({
     content: `**Manager role:** <@&${settings.managerRoleId}>\n\n**Individually approved managers:**\n${individual}`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -357,7 +360,7 @@ async function clockOn(interaction) {
   if (result.status === 'already_active') {
     await interaction.reply({
       content: `You are already clocked on. Your shift began **${formatDateTime(result.shift.startedAt, settings.timezone)}** (${discordTimestamp(result.shift.startedAt, 'R')}).`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -371,14 +374,14 @@ async function clockOn(interaction) {
   }
   await interaction.reply({
     content: `🟢 You are now **clocked on** for ${settings.businessName}.\n**Clocked on:** ${started}${logged ? '' : '\n⚠️ Your shift was saved, but the log message could not be sent.'}`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
 async function completeClockOff(interaction, targetUserId, forced = false) {
   const settings = guildSettings(interaction);
   if (!settings) return await replyNotConfigured(interaction);
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const nowIso = new Date().toISOString();
   const result = store.clockOff({ guildId: interaction.guildId, userId: targetUserId,
     nowIso, endedBy: interaction.user.id });
@@ -438,20 +441,20 @@ async function showMyTime(interaction) {
     )
     .setFooter({ text: 'Only you can see this.' })
     .setTimestamp();
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 async function showReport(interaction, weeksAgo = 0) {
   const settings = guildSettings(interaction);
   if (!settings) return await replyNotConfigured(interaction);
   if (!isApproved(interaction)) {
-    await interaction.reply({ content: 'You do not have permission to view duty reports.', ephemeral: true });
+    await interaction.reply({ content: 'You do not have permission to view duty reports.', flags: MessageFlags.Ephemeral });
     return;
   }
   const nowIso = new Date().toISOString();
   const summary = weeksAgo ? store.weeklySummary(interaction.guildId, nowIso, weeksAgo)
     : store.currentPeriodSummary(interaction.guildId, nowIso);
-  await interaction.reply({ embeds: buildWeeklyReport(summary, presentationConfig(settings), weeksAgo), ephemeral: true });
+  await interaction.reply({ embeds: buildWeeklyReport(summary, presentationConfig(settings), weeksAgo), flags: MessageFlags.Ephemeral });
 }
 
 async function showOnDuty(interaction) {
@@ -459,41 +462,52 @@ async function showOnDuty(interaction) {
   if (!settings) return await replyNotConfigured(interaction);
   const nowIso = new Date().toISOString();
   const active = store.activeInGuild(interaction.guildId);
-  await interaction.reply({ embeds: [buildOnDutyEmbed(active, presentationConfig(settings), nowIso)], ephemeral: true });
+  await interaction.reply({ embeds: [buildOnDutyEmbed(active, presentationConfig(settings), nowIso)], flags: MessageFlags.Ephemeral });
 }
 
-function adjustmentModal() {
-  const member = new TextInputBuilder().setCustomId('member').setLabel('Discord user ID or @mention')
-    .setPlaceholder('123456789012345678').setStyle(TextInputStyle.Short).setRequired(true);
+function adjustmentMemberPicker() {
+  const member = new UserSelectMenuBuilder()
+    .setCustomId(buttonIds.adjustMember)
+    .setPlaceholder('Type a name or choose a member')
+    .setMinValues(1)
+    .setMaxValues(1);
+  return {
+    content: 'Choose the person whose duty time you want to adjust. You can type in the list to filter names.',
+    components: [new ActionRowBuilder().addComponents(member)],
+    flags: MessageFlags.Ephemeral,
+  };
+}
+
+function adjustmentModal(targetUserId) {
   const minutes = new TextInputBuilder().setCustomId('minutes').setLabel('Minutes: + to add or - to remove')
     .setPlaceholder('Example: 30 or -15').setStyle(TextInputStyle.Short).setRequired(true);
   const reason = new TextInputBuilder().setCustomId('reason').setLabel('Reason').setPlaceholder('Forgot to clock off')
     .setStyle(TextInputStyle.Short).setMaxLength(150).setRequired(true);
-  return new ModalBuilder().setCustomId(buttonIds.adjustTimeModal).setTitle('Adjust Duty Time').addComponents(
-    new ActionRowBuilder().addComponents(member), new ActionRowBuilder().addComponents(minutes),
-    new ActionRowBuilder().addComponents(reason),
-  );
-}
-
-function userIdFromInput(value) {
-  const match = value.trim().match(/^(?:<@!?(\d{17,20})>|(\d{17,20}))$/);
-  return match?.[1] || match?.[2] || null;
+  return new ModalBuilder().setCustomId(`${buttonIds.adjustTimeModal}:${targetUserId}`)
+    .setTitle('Adjust Duty Time').addComponents(
+      new ActionRowBuilder().addComponents(minutes),
+      new ActionRowBuilder().addComponents(reason),
+    );
 }
 
 async function applyTimeAdjustment(interaction, targetUserId, minutes, reason, knownName = null) {
   const settings = guildSettings(interaction);
   if (!settings) return await replyNotConfigured(interaction);
   if (!isApproved(interaction)) {
-    await interaction.reply({ content: 'You do not have permission to adjust duty time.', ephemeral: true });
+    await interaction.reply({ content: 'You do not have permission to adjust duty time.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (!Number.isInteger(minutes) || minutes === 0 || Math.abs(minutes) > 10080) {
-    await interaction.reply({ content: 'Minutes must be a whole number from -10080 to 10080, and cannot be zero.', ephemeral: true });
+    await interaction.reply({ content: 'Minutes must be a whole number from -10080 to 10080, and cannot be zero.', flags: MessageFlags.Ephemeral });
     return;
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guildMember = await interaction.guild.members.fetch(targetUserId).catch(() => null);
   const discordUser = guildMember ? null : await client.users.fetch(targetUserId).catch(() => null);
+  if (guildMember?.user.bot || discordUser?.bot) {
+    await interaction.editReply('A bot cannot have duty time adjusted.');
+    return;
+  }
   const targetName = guildMember?.displayName || knownName || discordUser?.globalName || discordUser?.username;
   if (!targetName) {
     await interaction.editReply('I could not find that Discord user. Check the user ID and try again.');
@@ -520,36 +534,33 @@ function exportResetConfirmation() {
     new ButtonBuilder().setCustomId(buttonIds.confirmReset).setLabel('Confirm Export & Reset').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(buttonIds.cancelReset).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
   );
-  return { embeds: [embed], components: [row], ephemeral: true };
+  return { embeds: [embed], components: [row], flags: MessageFlags.Ephemeral };
 }
 
 async function exportAndReset(interaction) {
   const settings = guildSettings(interaction);
   if (!settings) return await replyNotConfigured(interaction);
   if (!isApproved(interaction)) {
-    await interaction.reply({ content: 'You do not have permission to export or reset duty totals.', ephemeral: true });
+    await interaction.reply({ content: 'You do not have permission to export or reset duty totals.', flags: MessageFlags.Ephemeral });
     return;
   }
   await interaction.deferUpdate();
   const nowIso = new Date().toISOString();
   const summary = store.currentPeriodSummary(interaction.guildId, nowIso);
   const date = DateTime.fromISO(nowIso, { zone: 'utc' }).setZone(settings.timezone).toISODate();
-  const shifts = store.currentPeriodShifts(interaction.guildId, nowIso);
-  const summaryAttachment = new AttachmentBuilder(Buffer.from(buildSummaryCsv(summary, settings.timezone), 'utf8'),
-    { name: `duty-report-${date}.csv` });
-  const shiftAttachment = new AttachmentBuilder(Buffer.from(buildShiftCsv(shifts, settings.timezone), 'utf8'),
-    { name: `duty-shifts-${date}.csv` });
+  const attachment = new AttachmentBuilder(Buffer.from(buildSummaryText(summary), 'utf8'),
+    { name: `duty-report-${date}.txt` });
   await interaction.editReply({
-    content: `Duty reports ready for **${summary.people.length} people**. The detailed file includes exact clock-on and clock-off times.`,
+    content: `Duty report ready for **${summary.people.length} people**.`,
     embeds: [],
     components: [],
-    files: [summaryAttachment, shiftAttachment],
+    files: [attachment],
   });
   store.resetPeriod({ guildId: interaction.guildId, resetBy: interaction.user.id, nowIso });
   await sendLog(interaction.guildId,
     `📤 <@${interaction.user.id}> exported the duty report and reset all totals. **${summary.people.length} people** were included.`)
     .catch((error) => console.error('Could not send reset log:', error));
-  await interaction.followUp({ content: '✅ Everyone’s totals are now zero for the new pay period.', ephemeral: true });
+  await interaction.followUp({ content: '✅ Everyone’s totals are now zero for the new pay period.', flags: MessageFlags.Ephemeral });
 }
 
 client.once(Events.ClientReady, async (readyClient) => {
@@ -574,24 +585,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId === buttonIds.report) return await showReport(interaction);
       if (interaction.customId === buttonIds.adjustTime) {
         if (!guildSettings(interaction)) return await replyNotConfigured(interaction);
-        if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to adjust duty time.', ephemeral: true });
-        return await interaction.showModal(adjustmentModal());
+        if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to adjust duty time.', flags: MessageFlags.Ephemeral });
+        return await interaction.reply(adjustmentMemberPicker());
       }
       if (interaction.customId === buttonIds.exportReset) {
         if (!guildSettings(interaction)) return await replyNotConfigured(interaction);
-        if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to export or reset totals.', ephemeral: true });
+        if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to export or reset totals.', flags: MessageFlags.Ephemeral });
         return await interaction.reply(exportResetConfirmation());
       }
       if (interaction.customId === buttonIds.confirmReset) return await exportAndReset(interaction);
       if (interaction.customId === buttonIds.cancelReset) return await interaction.update({ content: 'Export and reset cancelled.', embeds: [], components: [] });
       return;
     }
-    if (interaction.isModalSubmit() && interaction.customId === buttonIds.adjustTimeModal) {
-      const targetUserId = userIdFromInput(interaction.fields.getTextInputValue('member'));
+    if (interaction.isUserSelectMenu() && interaction.customId === buttonIds.adjustMember) {
+      if (!guildSettings(interaction)) return await replyNotConfigured(interaction);
+      if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to adjust duty time.', flags: MessageFlags.Ephemeral });
+      return await interaction.showModal(adjustmentModal(interaction.values[0]));
+    }
+    if (interaction.isModalSubmit() && interaction.customId.startsWith(`${buttonIds.adjustTimeModal}:`)) {
+      const targetUserId = interaction.customId.slice(buttonIds.adjustTimeModal.length + 1);
       const minutesText = interaction.fields.getTextInputValue('minutes').trim();
       const minutes = /^[-+]?\d+$/.test(minutesText) ? Number.parseInt(minutesText, 10) : Number.NaN;
       const reason = interaction.fields.getTextInputValue('reason').trim();
-      if (!targetUserId) return await interaction.reply({ content: 'Enter a valid Discord user ID or @mention.', ephemeral: true });
+      if (!/^\d{17,20}$/.test(targetUserId)) {
+        return await interaction.reply({ content: 'That Discord member selection is no longer valid. Please press Adjust Time again.', flags: MessageFlags.Ephemeral });
+      }
       return await applyTimeAdjustment(interaction, targetUserId, minutes, reason);
     }
     if (!interaction.isChatInputCommand()) return;
@@ -605,14 +623,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.commandName === 'duty-report') return await showReport(interaction, interaction.options.getInteger('weeks-ago') || 0);
     if (interaction.commandName === 'refresh-duty-panel') {
       if (!guildSettings(interaction)) return await replyNotConfigured(interaction);
-      if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to refresh the duty panel.', ephemeral: true });
-      await interaction.deferReply({ ephemeral: true });
+      if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to refresh the duty panel.', flags: MessageFlags.Ephemeral });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const result = await ensureDutyPanel(interaction.guildId);
       return await interaction.editReply(result.created ? 'The duty button panel has been posted.' : 'The duty button panel has been refreshed.');
     }
     if (interaction.commandName === 'force-clock-off') {
       if (!guildSettings(interaction)) return await replyNotConfigured(interaction);
-      if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to clock off other members.', ephemeral: true });
+      if (!isApproved(interaction)) return await interaction.reply({ content: 'You do not have permission to clock off other members.', flags: MessageFlags.Ephemeral });
       return await completeClockOff(interaction, interaction.options.getUser('member', true).id, true);
     }
     if (interaction.commandName === 'adjust-time') {
@@ -622,7 +640,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (error) {
     console.error('Interaction failed:', error);
-    const response = { content: 'Something went wrong. The error has been written to the bot console.', ephemeral: true };
+    const response = { content: 'Something went wrong. The error has been written to the bot console.', flags: MessageFlags.Ephemeral };
     if (interaction.replied || interaction.deferred) await interaction.followUp(response).catch(() => {});
     else await interaction.reply(response).catch(() => {});
   }

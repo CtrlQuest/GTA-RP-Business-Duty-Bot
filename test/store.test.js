@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { ShiftStore } = require('../src/store');
 const { formatDateTime, formatDuration } = require('../src/time');
-const { buildShiftCsv, buildSummaryCsv } = require('../src/export');
+const { buildSummaryText } = require('../src/export');
 const { isGuildOwner } = require('../src/permissions');
 
 function temporaryStore() {
@@ -130,24 +130,13 @@ test('applies manual minutes and starts at zero after a reset', () => {
   assert.equal(afterReset.active.length, 1);
 });
 
-test('exports pay-period totals as CSV minutes', () => {
+test('exports one labelled text line per person', () => {
   const store = temporaryStore();
   store.clockOn({
     guildId: 'guild-1', userId: 'user-1', displayName: 'Crane, Elliott', nowIso: '2026-09-14T10:00:00.000Z',
   });
   store.clockOff({ guildId: 'guild-1', userId: 'user-1', nowIso: '2026-09-14T12:15:00.000Z' });
   const summary = store.currentPeriodSummary('guild-1', '2026-09-14T13:00:00.000Z');
-  const csv = buildSummaryCsv(summary, 'America/New_York');
-  assert.match(csv, /"Crane, Elliott",135,1,0,No/);
-});
-
-test('exports exact clock-on and clock-off times in a detailed CSV', () => {
-  const store = temporaryStore();
-  store.clockOn({
-    guildId: 'guild-1', userId: 'user-1', displayName: 'Elliott', nowIso: '2026-09-14T13:00:00.000Z',
-  });
-  store.clockOff({ guildId: 'guild-1', userId: 'user-1', nowIso: '2026-09-14T15:15:00.000Z' });
-  const shifts = store.currentPeriodShifts('guild-1', '2026-09-14T16:00:00.000Z');
-  const csv = buildShiftCsv(shifts, 'America/New_York');
-  assert.match(csv, /2026-09-14 09:00 AM EDT,2026-09-14 11:15 AM EDT,135,Clocked Off/);
+  const output = buildSummaryText(summary);
+  assert.equal(output, 'Username: Crane, Elliott, Shifts Worked: 1, Minutes Worked: 135\r\n');
 });

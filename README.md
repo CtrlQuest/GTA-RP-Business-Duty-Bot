@@ -10,7 +10,7 @@ A multi-server Discord app for GTA RP businesses. Each Discord server configures
 - Separate clock activity and management log channel
 - Current on-duty list and count
 - Current pay-period report with minutes and shift count per person
-- Manager-only time corrections, summary and detailed CSV exports, and reset controls
+- Manager-only time corrections with a searchable member picker, simple labelled text export, and reset controls
 - `/add-manager`, `/remove-manager`, and `/list-managers`
 - Server-owner `/setup` with Discord channel and role pickers
 - Separate data and configuration for every Discord server
@@ -93,8 +93,8 @@ Only the Discord server owner can add or remove individually approved managers. 
 | My Time | Everyone | Privately shows personal status, minutes, and five recent shifts |
 | Who's On | Everyone | Shows active staff and current minutes |
 | Weekly Report | Managers | Shows current totals and shift counts |
-| Adjust Time | Managers | Opens a form to add or remove minutes |
-| Export & Reset | Managers | Delivers summary and detailed shift CSVs, then starts a new period at zero |
+| Adjust Time | Managers | Opens a searchable Discord member picker, followed by the minutes form |
+| Export & Reset | Managers | Delivers one clearly labelled line per person, then starts a new period at zero |
 | `/setup` | Owner/admin | Selects channels, manager role, business name, and timezone |
 | `/setup-status` | Managers | Shows the server's saved configuration |
 | `/add-manager` | Server owner only | Approves one person individually |
@@ -103,7 +103,7 @@ Only the Discord server owner can add or remove individually approved managers. 
 | `/duty-report` | Managers | Current period or up to eight earlier calendar weeks |
 | `/my-time` | Everyone | Alternative command for the private My Time view |
 | `/force-clock-off` | Managers | Ends a forgotten active shift |
-| `/adjust-time` | Managers | Alternative correction command with a member picker |
+| `/adjust-time` | Managers | Alternative correction command with Discord's member picker |
 | `/refresh-duty-panel` | Managers | Restores the panel if its message was deleted |
 
 ## Sunday payroll workflow
@@ -111,9 +111,9 @@ Only the Discord server owner can add or remove individually approved managers. 
 1. Press **Weekly Report** to review everyone’s minutes.
 2. Correct mistakes with **Adjust Time**. Positive numbers add minutes; negative numbers remove them.
 3. Press **Export & Reset** and confirm.
-4. Download the summary CSV containing totals and the detailed CSV containing each shift's exact clock-on and clock-off times.
+4. Download the text report. Each person has one clearly labelled line: `Username: Name, Shifts Worked: 5, Minutes Worked: 30`.
 
-The reset happens only after Discord successfully delivers both CSV files. Active staff stay clocked on: their old minutes go into the export, while their new total begins from the exact reset time. Raw history remains in the data file.
+The reset happens only after Discord successfully delivers the report. Active staff stay clocked on: their old minutes go into the export, while their new total begins from the exact reset time. Exact clock times remain available in the Discord logs and My Time view, while raw history remains in the data file.
 
 ## Recommended hosting: GitHub plus Railway
 
