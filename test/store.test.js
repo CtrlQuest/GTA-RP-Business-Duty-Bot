@@ -4,8 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { ShiftStore } = require('../src/store');
-const { formatDuration } = require('../src/time');
-const { buildSummaryCsv } = require('../src/export');
+const { formatDateTime, formatDuration } = require('../src/time');
+const { buildShiftCsv, buildSummaryCsv } = require('../src/export');
+const { isGuildOwner } = require('../src/permissions');
 
 function temporaryStore() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'duty-bot-'));
@@ -54,6 +55,17 @@ test('formats working durations', () => {
   assert.equal(formatDuration(35 * 60_000), '35 minutes');
   assert.equal(formatDuration(60_000), '1 minute');
   assert.equal(formatDuration((2 * 60 + 15) * 60_000), '135 minutes');
+});
+
+test('formats exact Eastern times with daylight saving', () => {
+  assert.equal(formatDateTime('2026-01-14T14:00:00.000Z', 'America/New_York'), '14 Jan 2026, 09:00 AM EST');
+  assert.equal(formatDateTime('2026-09-14T14:00:00.000Z', 'America/New_York'), '14 Sep 2026, 10:00 AM EDT');
+});
+
+test('only recognises the actual Discord server owner', () => {
+  assert.equal(isGuildOwner('owner-1', 'owner-1'), true);
+  assert.equal(isGuildOwner('owner-1', 'administrator-1'), false);
+  assert.equal(isGuildOwner(null, 'owner-1'), false);
 });
 
 test('remembers the permanent button panel message', () => {
@@ -127,4 +139,15 @@ test('exports pay-period totals as CSV minutes', () => {
   const summary = store.currentPeriodSummary('guild-1', '2026-09-14T13:00:00.000Z');
   const csv = buildSummaryCsv(summary, 'America/New_York');
   assert.match(csv, /"Crane, Elliott",135,1,0,No/);
+});
+
+test('exports exact clock-on and clock-off times in a detailed CSV', () => {
+  const store = temporaryStore();
+  store.clockOn({
+    guildId: 'guild-1', userId: 'user-1', displayName: 'Elliott', nowIso: '2026-09-14T13:00:00.000Z',
+  });
+  store.clockOff({ guildId: 'guild-1', userId: 'user-1', nowIso: '2026-09-14T15:15:00.000Z' });
+  const shifts = store.currentPeriodShifts('guild-1', '2026-09-14T16:00:00.000Z');
+  const csv = buildShiftCsv(shifts, 'America/New_York');
+  assert.match(csv, /2026-09-14 09:00 AM EDT,2026-09-14 11:15 AM EDT,135,Clocked Off/);
 });

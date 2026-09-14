@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { formatDuration } = require('./time');
+const { formatDuration, formatShortDateTime } = require('./time');
 
 function escapeMarkdown(text) {
   return String(text).replace(/([\\`*_{}\[\]()<>#+\-.!|])/g, '\\$1');
@@ -53,7 +53,8 @@ function buildOnDutyEmbed(activeShifts, config, nowIso) {
     ? activeShifts
         .map((shift) => {
           const duration = formatDuration(Date.parse(nowIso) - Date.parse(shift.startedAt));
-          return `🟢 <@${shift.userId}> — ${duration}`;
+          const started = formatShortDateTime(shift.startedAt, config.timezone);
+          return `🟢 <@${shift.userId}> — ${duration} • since ${started}`;
         })
         .join('\n')
     : 'Nobody is currently clocked on.';

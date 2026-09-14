@@ -224,6 +224,27 @@ class ShiftStore {
     return this.summaryBetween(guildId, nowIso, startMs, nowMs, label, true);
   }
 
+  currentPeriodShifts(guildId, nowIso) {
+    const summary = this.currentPeriodSummary(guildId, nowIso);
+    const nowMs = Date.parse(nowIso);
+    return this.data.shifts
+      .filter((shift) => shift.guildId === guildId)
+      .map((shift) => {
+        const startedMs = Date.parse(shift.startedAt);
+        const actualEndMs = shift.endedAt ? Date.parse(shift.endedAt) : nowMs;
+        const countedStartMs = Math.max(startedMs, summary.startMs);
+        const countedEndMs = Math.min(actualEndMs, summary.endMs);
+        return {
+          ...shift,
+          countedStartedAt: new Date(countedStartMs).toISOString(),
+          countedEndedAt: new Date(countedEndMs).toISOString(),
+          countedMilliseconds: Math.max(0, countedEndMs - countedStartMs),
+        };
+      })
+      .filter((shift) => shift.countedMilliseconds > 0)
+      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+  }
+
   weeklySummary(guildId, nowIso, weeksAgo = 0) {
     const timezone = this.guildConfig(guildId)?.timezone || this.defaultTimezone;
     const window = weekWindow(nowIso, timezone, weeksAgo);

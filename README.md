@@ -4,12 +4,13 @@ A multi-server Discord app for GTA RP businesses. Each Discord server configures
 
 ## Features
 
-- Staff Clock On, Clock Off, and Who's On buttons
+- Staff Clock On, Clock Off, My Time, and Who's On buttons
 - All work time displayed in minutes
-- Separate clock-off and management log channel
+- Exact clock-on and clock-off times in the configured server timezone
+- Separate clock activity and management log channel
 - Current on-duty list and count
 - Current pay-period report with minutes and shift count per person
-- Manager-only time corrections, CSV export, and reset controls
+- Manager-only time corrections, summary and detailed CSV exports, and reset controls
 - `/add-manager`, `/remove-manager`, and `/list-managers`
 - Server-owner `/setup` with Discord channel and role pickers
 - Separate data and configuration for every Discord server
@@ -81,7 +82,7 @@ The following can run reports, adjust time, force clock-offs, export, and reset:
 - Anyone with the manager role chosen in `/setup`
 - Anyone individually approved with `/add-manager`
 
-Only the server owner, Discord administrators, and members of the configured manager role can add or remove individually approved managers. An individually approved manager cannot grant access to another person unless they also have the configured role.
+Only the Discord server owner can add or remove individually approved managers. Administrators, the configured manager role, and individually approved managers cannot grant this access.
 
 ## Commands and buttons
 
@@ -89,16 +90,18 @@ Only the server owner, Discord administrators, and members of the configured man
 | --- | --- | --- |
 | Clock On | Everyone | Starts the member's shift |
 | Clock Off | Everyone | Ends the shift and logs its minutes |
+| My Time | Everyone | Privately shows personal status, minutes, and five recent shifts |
 | Who's On | Everyone | Shows active staff and current minutes |
 | Weekly Report | Managers | Shows current totals and shift counts |
 | Adjust Time | Managers | Opens a form to add or remove minutes |
-| Export & Reset | Managers | Delivers a CSV, then starts a new period at zero |
+| Export & Reset | Managers | Delivers summary and detailed shift CSVs, then starts a new period at zero |
 | `/setup` | Owner/admin | Selects channels, manager role, business name, and timezone |
 | `/setup-status` | Managers | Shows the server's saved configuration |
-| `/add-manager` | Owner/admin/manager role | Approves one person individually |
-| `/remove-manager` | Owner/admin/manager role | Removes an individual approval |
+| `/add-manager` | Server owner only | Approves one person individually |
+| `/remove-manager` | Server owner only | Removes an individual approval |
 | `/list-managers` | Managers | Shows the configured role and approved people |
 | `/duty-report` | Managers | Current period or up to eight earlier calendar weeks |
+| `/my-time` | Everyone | Alternative command for the private My Time view |
 | `/force-clock-off` | Managers | Ends a forgotten active shift |
 | `/adjust-time` | Managers | Alternative correction command with a member picker |
 | `/refresh-duty-panel` | Managers | Restores the panel if its message was deleted |
@@ -108,9 +111,9 @@ Only the server owner, Discord administrators, and members of the configured man
 1. Press **Weekly Report** to review everyone’s minutes.
 2. Correct mistakes with **Adjust Time**. Positive numbers add minutes; negative numbers remove them.
 3. Press **Export & Reset** and confirm.
-4. Download the CSV containing each member's ID, display name, total minutes, shift count, adjustments, and current status.
+4. Download the summary CSV containing totals and the detailed CSV containing each shift's exact clock-on and clock-off times.
 
-The reset happens only after Discord successfully delivers the CSV. Active staff stay clocked on: their old minutes go into the export, while their new total begins from the exact reset time. Raw history remains in the data file.
+The reset happens only after Discord successfully delivers both CSV files. Active staff stay clocked on: their old minutes go into the export, while their new total begins from the exact reset time. Raw history remains in the data file.
 
 ## Recommended hosting: GitHub plus Railway
 

@@ -32,4 +32,37 @@ function buildSummaryCsv(summary, timezone) {
   return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
-module.exports = { buildSummaryCsv };
+function csvDateTime(iso, timezone) {
+  if (!iso) return '';
+  return DateTime.fromISO(iso, { zone: 'utc' })
+    .setZone(timezone)
+    .toFormat('yyyy-LL-dd hh:mm a ZZZZ');
+}
+
+function buildShiftCsv(shifts, timezone) {
+  const header = [
+    'Discord User ID',
+    'Display Name',
+    'Clocked On',
+    'Clocked Off',
+    'Minutes In Pay Period',
+    'Status At Export',
+    'Clocked Off By User ID',
+    'Counted From',
+    'Counted Until',
+  ];
+  const rows = shifts.map((shift) => [
+    shift.userId,
+    shift.displayName,
+    csvDateTime(shift.startedAt, timezone),
+    csvDateTime(shift.endedAt, timezone),
+    durationMinutes(shift.countedMilliseconds),
+    shift.endedAt ? 'Clocked Off' : 'On Duty',
+    shift.endedBy || '',
+    csvDateTime(shift.countedStartedAt, timezone),
+    csvDateTime(shift.countedEndedAt, timezone),
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+}
+
+module.exports = { buildShiftCsv, buildSummaryCsv };

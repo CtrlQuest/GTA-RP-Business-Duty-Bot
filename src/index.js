@@ -21,9 +21,15 @@ const {
 const { DateTime } = require('luxon');
 const { loadConfig } = require('./config');
 const { ShiftStore } = require('./store');
-const { formatDuration, discordTimestamp } = require('./time');
+const {
+  formatDateTime,
+  formatDuration,
+  formatShortDateTime,
+  discordTimestamp,
+} = require('./time');
 const { buildWeeklyReport, buildOnDutyEmbed } = require('./report');
-const { buildSummaryCsv } = require('./export');
+const { buildShiftCsv, buildSummaryCsv } = require('./export');
+const { isGuildOwner } = require('./permissions');
 
 const config = loadConfig();
 const store = new ShiftStore(config.dataFile, config.defaultTimezone);
@@ -32,6 +38,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const buttonIds = {
   clockOn: 'duty_clock_on',
   clockOff: 'duty_clock_off',
+  myTime: 'duty_my_time',
   onDuty: 'duty_on_duty',
   report: 'duty_weekly_report',
   adjustTime: 'duty_adjust_time',
@@ -78,13 +85,13 @@ const commands = [
   new SlashCommandBuilder().setName('setup-status').setDescription('Show this server’s current duty-bot settings.'),
   new SlashCommandBuilder()
     .setName('add-manager')
-    .setDescription('Approve a person to run reports and change duty time.')
+    .setDescription('Server owner: approve a person to run reports and change duty time.')
     .addUserOption((option) =>
       option.setName('member').setDescription('Person to approve as a duty manager.').setRequired(true),
     ),
   new SlashCommandBuilder()
     .setName('remove-manager')
-    .setDescription('Remove a person’s individual duty-manager approval.')
+    .setDescription('Server owner: remove a person’s individual duty-manager approval.')
     .addUserOption((option) =>
       option.setName('member').setDescription('Person whose approval should be removed.').setRequired(true),
     ),
@@ -100,6 +107,7 @@ const commands = [
         .setMinValue(0).setMaxValue(8),
     ),
   new SlashCommandBuilder().setName('on-duty').setDescription('Show everyone who is currently clocked on.'),
+  new SlashCommandBuilder().setName('my-time').setDescription('Show your current duty status and recorded minutes.'),
   new SlashCommandBuilder()
     .setName('force-clock-off')
     .setDescription('Clock another member off duty.')
@@ -133,7 +141,7 @@ function hasRole(interaction, roleId) {
 }
 
 function isServerOwner(interaction) {
-  return interaction.guild?.ownerId === interaction.user.id;
+  return isGuildOwner(interaction.guild?.ownerId, interaction.user.id);
 }
 
 function canRunSetup(interaction) {
@@ -150,9 +158,7 @@ function isApproved(interaction) {
 }
 
 function canAssignManagers(interaction) {
-  const settings = guildSettings(interaction);
-  if (!settings) return false;
-  return canRunSetup(interaction) || hasRole(interaction, settings.managerRoleId);
+  return isServerOwner(interaction);
 }
 
 function displayName(interaction) {
@@ -160,7 +166,7 @@ function displayName(interaction) {
 }
 
 function presentationConfig(settings) {
-  return { businessName: settings.businessName, colour: config.colour };
+  return { businessName: settings.businessName, colour: config.colour, timezone: settings.timezone };
 }
 
 async function replyNotConfigured(interaction) {
@@ -180,10 +186,12 @@ function dutyPanel(settings) {
     .addFields(
       { name: 'Clock On', value: 'Press when your shift begins.', inline: true },
       { name: 'Clock Off', value: 'Press when your shift finishes.', inline: true },
+      { name: 'My Time', value: 'View your status, minutes, and recent shifts.', inline: true },
     );
   const staffRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(buttonIds.clockOn).setLabel('Clock On').setEmoji('🟢').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(buttonIds.clockOff).setLabel('Clock Off').setEmoji('🔴').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(buttonIds.myTime).setLabel('My Time').setEmoji('⏱️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(buttonIds.onDuty).setLabel("Who's On").setEmoji('👥').setStyle(ButtonStyle.Primary),
   );
   const adminRow = new ActionRowBuilder().addComponents(
@@ -300,7 +308,7 @@ async function changeManager(interaction, remove = false) {
   if (!settings) return await replyNotConfigured(interaction);
   if (!canAssignManagers(interaction)) {
     await interaction.reply({
-      content: 'Only the server owner, a Discord administrator, or the configured manager role can change approved managers.',
+      content: 'Only the Discord server owner can add or remove approved managers.',
       ephemeral: true,
     });
     return;
@@ -348,12 +356,23 @@ async function clockOn(interaction) {
     displayName: displayName(interaction), nowIso });
   if (result.status === 'already_active') {
     await interaction.reply({
-      content: `You are already clocked on. Your shift began ${discordTimestamp(result.shift.startedAt, 'R')}.`,
+      content: `You are already clocked on. Your shift began **${formatDateTime(result.shift.startedAt, settings.timezone)}** (${discordTimestamp(result.shift.startedAt, 'R')}).`,
       ephemeral: true,
     });
     return;
   }
-  await interaction.reply({ content: `🟢 You are now **clocked on** for ${settings.businessName}.`, ephemeral: true });
+  const started = formatDateTime(result.shift.startedAt, settings.timezone);
+  let logged = true;
+  try {
+    logged = await sendLog(interaction.guildId, `🟢 <@${interaction.user.id}> clocked on.\n**Clocked on:** ${started}`);
+  } catch (error) {
+    logged = false;
+    console.error('Could not send the clock-on log:', error);
+  }
+  await interaction.reply({
+    content: `🟢 You are now **clocked on** for ${settings.businessName}.\n**Clocked on:** ${started}${logged ? '' : '\n⚠️ Your shift was saved, but the log message could not be sent.'}`,
+    ephemeral: true,
+  });
 }
 
 async function completeClockOff(interaction, targetUserId, forced = false) {
@@ -370,7 +389,11 @@ async function completeClockOff(interaction, targetUserId, forced = false) {
   const shiftMs = Date.parse(result.shift.endedAt) - Date.parse(result.shift.startedAt);
   const summary = store.currentPeriodSummary(interaction.guildId, nowIso);
   const person = summary.people.find((entry) => entry.userId === targetUserId);
+  const started = formatDateTime(result.shift.startedAt, settings.timezone);
+  const ended = formatDateTime(result.shift.endedAt, settings.timezone);
   const logMessage = [`🔴 <@${targetUserId}> clocked off${forced ? ` (by <@${interaction.user.id}>)` : ''}.`,
+    `**Clocked on:** ${started}`,
+    `**Clocked off:** ${ended}`,
     `**Shift worked:** ${formatDuration(shiftMs)}`,
     `**Total this pay period:** ${formatDuration(person?.milliseconds || 0)} across ${person?.shiftCount || 0} shift${person?.shiftCount === 1 ? '' : 's'}.`].join('\n');
   let logged = true;
@@ -379,8 +402,43 @@ async function completeClockOff(interaction, targetUserId, forced = false) {
     console.error('Could not send the clock-off log:', error);
   }
   await interaction.editReply(
-    `${forced ? `<@${targetUserId}> has been` : 'You are now'} **clocked off**. Shift length: **${formatDuration(shiftMs)}**.${logged ? '' : '\n⚠️ The shift was saved, but the log message could not be sent.'}`,
+    `${forced ? `<@${targetUserId}> has been` : 'You are now'} **clocked off**.\n**Clocked on:** ${started}\n**Clocked off:** ${ended}\n**Shift length:** ${formatDuration(shiftMs)}${logged ? '' : '\n⚠️ The shift was saved, but the log message could not be sent.'}`,
   );
+}
+
+async function showMyTime(interaction) {
+  const settings = guildSettings(interaction);
+  if (!settings) return await replyNotConfigured(interaction);
+  const nowIso = new Date().toISOString();
+  const summary = store.currentPeriodSummary(interaction.guildId, nowIso);
+  const person = summary.people.find((entry) => entry.userId === interaction.user.id);
+  const active = store.activeFor(interaction.guildId, interaction.user.id);
+  const shifts = store.currentPeriodShifts(interaction.guildId, nowIso)
+    .filter((shift) => shift.userId === interaction.user.id)
+    .slice(0, 5);
+  const recent = shifts.length
+    ? shifts.map((shift) => {
+      const start = formatShortDateTime(shift.startedAt, settings.timezone);
+      const end = shift.endedAt ? formatShortDateTime(shift.endedAt, settings.timezone) : 'Still on duty';
+      return `• ${start} → ${end} — **${formatDuration(shift.countedMilliseconds)}**`;
+    }).join('\n')
+    : 'No shifts recorded in this pay period.';
+  const status = active
+    ? `🟢 On duty since ${formatDateTime(active.startedAt, settings.timezone)}\nCurrent session: **${formatDuration(Date.parse(nowIso) - Date.parse(active.startedAt))}**`
+    : '🔴 Clocked off';
+  const embed = new EmbedBuilder()
+    .setColor(config.colour)
+    .setTitle(`${settings.businessName} — My Time`)
+    .setDescription(status)
+    .addFields(
+      { name: 'Total this pay period', value: formatDuration(person?.milliseconds || 0), inline: true },
+      { name: 'Shifts recorded', value: String(person?.shiftCount || 0), inline: true },
+      { name: 'Manual adjustments', value: `${person?.adjustmentMinutes || 0} minutes`, inline: true },
+      { name: 'Recent shifts', value: recent },
+    )
+    .setFooter({ text: 'Only you can see this.' })
+    .setTimestamp();
+  await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 async function showReport(interaction, weeksAgo = 0) {
@@ -476,10 +534,17 @@ async function exportAndReset(interaction) {
   const nowIso = new Date().toISOString();
   const summary = store.currentPeriodSummary(interaction.guildId, nowIso);
   const date = DateTime.fromISO(nowIso, { zone: 'utc' }).setZone(settings.timezone).toISODate();
-  const attachment = new AttachmentBuilder(Buffer.from(buildSummaryCsv(summary, settings.timezone), 'utf8'),
+  const shifts = store.currentPeriodShifts(interaction.guildId, nowIso);
+  const summaryAttachment = new AttachmentBuilder(Buffer.from(buildSummaryCsv(summary, settings.timezone), 'utf8'),
     { name: `duty-report-${date}.csv` });
-  await interaction.editReply({ content: `Duty report ready for **${summary.people.length} people**.`,
-    embeds: [], components: [], files: [attachment] });
+  const shiftAttachment = new AttachmentBuilder(Buffer.from(buildShiftCsv(shifts, settings.timezone), 'utf8'),
+    { name: `duty-shifts-${date}.csv` });
+  await interaction.editReply({
+    content: `Duty reports ready for **${summary.people.length} people**. The detailed file includes exact clock-on and clock-off times.`,
+    embeds: [],
+    components: [],
+    files: [summaryAttachment, shiftAttachment],
+  });
   store.resetPeriod({ guildId: interaction.guildId, resetBy: interaction.user.id, nowIso });
   await sendLog(interaction.guildId,
     `📤 <@${interaction.user.id}> exported the duty report and reset all totals. **${summary.people.length} people** were included.`)
@@ -504,6 +569,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       if (interaction.customId === buttonIds.clockOn) return await clockOn(interaction);
       if (interaction.customId === buttonIds.clockOff) return await completeClockOff(interaction, interaction.user.id);
+      if (interaction.customId === buttonIds.myTime) return await showMyTime(interaction);
       if (interaction.customId === buttonIds.onDuty) return await showOnDuty(interaction);
       if (interaction.customId === buttonIds.report) return await showReport(interaction);
       if (interaction.customId === buttonIds.adjustTime) {
@@ -535,6 +601,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.commandName === 'remove-manager') return await changeManager(interaction, true);
     if (interaction.commandName === 'list-managers') return await listManagers(interaction);
     if (interaction.commandName === 'on-duty') return await showOnDuty(interaction);
+    if (interaction.commandName === 'my-time') return await showMyTime(interaction);
     if (interaction.commandName === 'duty-report') return await showReport(interaction, interaction.options.getInteger('weeks-ago') || 0);
     if (interaction.commandName === 'refresh-duty-panel') {
       if (!guildSettings(interaction)) return await replyNotConfigured(interaction);

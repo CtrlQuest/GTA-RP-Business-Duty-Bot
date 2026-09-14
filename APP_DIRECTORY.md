@@ -46,15 +46,17 @@ Clock staff in and out, track duty minutes, correct missed shifts, export weekly
 
 Run staff duty tracking without spreadsheets or manual timers. Team members clock on and off through clear Discord buttons while managers can see who is working, review total minutes and shift counts, correct forgotten time, export payroll-ready CSV reports, and reset totals for the next period.
 
-Each Discord server chooses its own business name, clock channel, private log channel, timezone, and manager role through `/setup`. Approved managers can also be added individually without changing Discord roles.
+Each Discord server chooses its own business name, clock channel, private log channel, timezone, and manager role through `/setup`. The server owner can also approve individual managers without changing Discord roles.
 
 Key features:
 
 - Button-based clock on and clock off
+- Private My Time button with personal totals and recent shifts
 - Live on-duty list
+- Exact clock-on and clock-off timestamps in the server timezone
 - Minute-based pay-period reports
 - Manager time corrections with audit logs
-- CSV export and confirmed reset
+- Summary and detailed shift CSV exports with a confirmed reset
 - Separate configuration and records for each server
 - Eastern, Central, Mountain, Pacific, UTC, and UK timezone choices
 

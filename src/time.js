@@ -9,6 +9,18 @@ function formatDuration(milliseconds) {
   return `${totalMinutes} minute${totalMinutes === 1 ? '' : 's'}`;
 }
 
+function formatDateTime(iso, timezone) {
+  return DateTime.fromISO(iso, { zone: 'utc' })
+    .setZone(timezone)
+    .toFormat('dd LLL yyyy, hh:mm a ZZZZ');
+}
+
+function formatShortDateTime(iso, timezone) {
+  return DateTime.fromISO(iso, { zone: 'utc' })
+    .setZone(timezone)
+    .toFormat('dd LLL, hh:mm a ZZZZ');
+}
+
 function weekWindow(nowIso, timezone, weeksAgo = 0) {
   const now = DateTime.fromISO(nowIso, { zone: 'utc' }).setZone(timezone);
   const start = now.startOf('week').minus({ weeks: weeksAgo });
@@ -24,4 +36,11 @@ function discordTimestamp(iso, style = 'f') {
   return `<t:${seconds}:${style}>`;
 }
 
-module.exports = { durationMinutes, formatDuration, weekWindow, discordTimestamp };
+module.exports = {
+  durationMinutes,
+  formatDateTime,
+  formatDuration,
+  formatShortDateTime,
+  weekWindow,
+  discordTimestamp,
+};
